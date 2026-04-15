@@ -1,0 +1,11 @@
+services:
+  xv6:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/home/xv6/xv6-riscv
+    working_dir: /home/xv6/xv6-riscv

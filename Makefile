@@ -126,11 +126,14 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 .PRECIOUS: %.o
 
 UPROGS=\
+	$U/_address_trans\
+	$U/_areana_alloc\
 	$U/_cat\
 	$U/_echo\
 	$U/_forktest\
 	$U/_grep\
 	$U/_init\
+	$U/_inspect_file\
 	$U/_kill\
 	$U/_ln\
 	$U/_ls\
