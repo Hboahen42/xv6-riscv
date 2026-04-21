@@ -333,6 +333,57 @@ sys_open(void)
       end_op();
       return -1;
     }
+
+    // Symlink resolution
+    // Follow symlink unless O_NOFOLLOW is set.
+    if (!(omode & O_NOFOLLOW)) {
+      int depth;
+      for (depth = 0; depth < 10; depth++) {
+        // Stop when we reach a non-symlink inode
+        if (ip->type != T_SYMLINK) break;
+
+        // Read the stored target path out of the symlink inode's data.
+        // Read at most MAXPATH-1 bytes to leave room for the null terminator.
+
+        char symTarget[MAXPATH];
+        int n = readi(ip, 0, (uint64)symTarget, 0, MAXPATH-1);
+
+        // Release ip before calling namei. Holding a sleeplock across
+        // namei causes deadlock because namei calls ilock internally.
+        iunlockput(ip);
+
+        if (n <= 0) {
+          end_op();
+          return -1;
+        }
+
+        // readi does not null-terminate. Add it manually using the byte count.
+        symTarget[n] = '\0';
+
+        // Resolve the target path to its inode
+        // Return 0 if the target does not exist (dangling link).
+        ip = namei(symTarget);
+        if (ip == 0) {
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+      }
+
+      // if still a symlink after 10 hops, we hit a cycle or overlong chain.
+      if (ip->type == T_SYMLINK) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+    } else {
+      // O_NOFOLLOW is set. If the inode is a symlink, return error.
+      if (ip->type == T_SYMLINK) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+    }
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -501,5 +552,47 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  int len;
+
+  // copy target and path strings from user space into kernel buffers.
+  // argstr returns -1 if the pointer is invalid or the string is too long.
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+
+  // Start a logged transaction. All writes until end_op() are journaled.
+  begin_op();
+
+  // Allocate a new inode of type T_SYMLINK at the given path.
+  // create() handles parent lookup, inode allocation, and dirlink.
+  // Returns the inode locked and referenced, or 0 on failure.
+  ip = create(path, T_SYMLINK, 0, 0);
+  if (ip == 0) {
+    end_op();
+    return -1;
+  }
+
+  // Write the target path string into the inode's data blocks
+  // user_src=0 means target is a kernel address, not user space.
+  // we skip the null terminator since ip->size tracks the length.
+  len = strlen(target);
+  if (writei(ip, 0, (uint64) target, 0, len) != len) {
+    // Short write means the disk is full. Clean up and fail.
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+
+  // Release the sleep lock and drop the reference count.
+  iunlockput(ip);
+  end_op();
+
   return 0;
 }
