@@ -376,6 +376,11 @@ sys_open(void)
         end_op();
         return -1;
       }
+      if (ip->type == T_DIR && omode != O_RDONLY) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
     } else {
       // O_NOFOLLOW is set. If the inode is a symlink, return error.
       if (ip->type == T_SYMLINK) {
@@ -584,7 +589,12 @@ sys_symlink(void) {
   // we skip the null terminator since ip->size tracks the length.
   len = strlen(target);
   if (writei(ip, 0, (uint64) target, 0, len) != len) {
-    // Short write means the disk is full. Clean up and fail.
+    // Short write: disk is full. The inode was already linked into the
+    // directory by create(). Roll back by dropping nlink to 0 so that
+    // iput() will free the inode and its blocks when ref hits zero.
+    // iupdate() persists the nlink change to disk before we release.
+    ip->nlink = 0;
+    iupdate(ip);
     iunlockput(ip);
     end_op();
     return -1;
