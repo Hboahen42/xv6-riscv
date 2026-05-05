@@ -1,11 +1,17 @@
 services:
+  # Define the xv6 development service
   xv6:
+    # Build the image using the local Dockerfile
     build:
       context: .
       dockerfile: Dockerfile
+    # Specify the platform to ensure compatibility
     platform: linux/amd64
+    # Enable interactive shell (stdin and tty)
     stdin_open: true
     tty: true
+    # Mount the current directory into the container for live development
     volumes:
       - .:/home/xv6/xv6-riscv
+    # Set the working directory inside the container
     working_dir: /home/xv6/xv6-riscv
